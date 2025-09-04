@@ -1,0 +1,4 @@
+pytelegrambotapi>=4.0.0
+python-dotenv
+SQLAlchemy>=1.4
+psycopg2-binary

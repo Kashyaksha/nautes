@@ -1,11 +1,17 @@
-import telebot
+"""
+Инициализация TeleBot.
+"""
+from telebot import TeleBot, logger as tb_logger
 from app.config.settings import TELEGRAM_TOKEN
 from app.utils.exceptions import ConfigError
-
+from app.utils.logger import logger
 
 if not TELEGRAM_TOKEN:
-    raise ConfigError("TELEGRAM_TOKEN отсутствует. Добавь его в .env")
+    raise ConfigError("TELEGRAM_TOKEN is not set. Add it to .env")
 
+# Включим логирование TeleBot на уровень INFO
+tb_logger.setLevel("INFO")
 
-# parse_mode можно поменять при необходимости
-bot = telebot.TeleBot(TELEGRAM_TOKEN, parse_mode="HTML")
+# Создаём bot
+bot = TeleBot(TELEGRAM_TOKEN, parse_mode="HTML")
+logger.info("TeleBot initialized")
