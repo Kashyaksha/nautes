@@ -1,13 +1,10 @@
-"""
-Отправка сообщений — одна точка для обёртки вызовов Telegram (в будущем можно подключить WhatsApp).
-"""
-from app.core.base_bot import bot
-from app.utils.logger import logger
-from telebot import types
+from __future__ import annotations
+from telebot import TeleBot
+from app.config.settings import TELEGRAM_TOKEN
+from app.utils.exceptions import ConfigError
 
-def send_text(chat_id: int, text: str, reply_markup: types.InlineKeyboardMarkup = None):
-    try:
-        return bot.send_message(chat_id, text, reply_markup=reply_markup)
-    except Exception as e:
-        logger.exception("Failed to send message to %s: %s", chat_id, e)
-        raise
+def get_bot() -> TeleBot:
+    token = TELEGRAM_TOKEN
+    if not token:
+        raise ConfigError("TELEGRAM_TOKEN не задан. Установите в .env или переменных окружения.")
+    return TeleBot(token, parse_mode="HTML", threaded=True)

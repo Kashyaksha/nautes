@@ -1,131 +1,60 @@
-# app/services/database.py
-import datetime
-from contextlib import contextmanager
-from sqlalchemy import (
-    create_engine,
-    Column,
-    Integer,
-    String,
-    DateTime,
-    Text,
-    Float,
-    ForeignKey,
-    BigInteger,
-    inspect,
-    text,
-)
-from sqlalchemy.orm import sessionmaker, declarative_base, scoped_session, relationship
+from __future__ import annotations
+from typing import Optional, List
+from sqlalchemy import create_engine, String, Integer, ForeignKey, select, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, Session, sessionmaker
 from app.config.settings import DATABASE_URL
 from app.utils.logger import logger
 
-# Engine
-engine = create_engine(
-    DATABASE_URL,
-    echo=False,
-    pool_pre_ping=True,
-    future=True,
-)
+class Base(DeclarativeBase):
+    pass
 
-# Session factory
-SessionFactory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
-SessionLocal = scoped_session(SessionFactory)
-
-Base = declarative_base()
-
-# Models
-class User(Base):
-    __tablename__ = "users"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    telegram_id = Column(Integer, unique=True, index=True, nullable=False)  # ✅ уникальный идентификатор
-    username = Column(String(255), nullable=True, index=True)  # ❌ убрали unique
-    first_seen = Column(DateTime, default=datetime.datetime.utcnow)
-
-
-class Category(Base):
-    __tablename__ = "categories"
-    id = Column(Integer, primary_key=True)
-    name = Column(String(150), unique=True, nullable=False)
-    description = Column(Text, nullable=True)
-    places = relationship("Place", back_populates="category")
-
+class City(Base):
+    __tablename__ = "cities"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    places: Mapped[List["Place"]] = relationship(back_populates="city", cascade="all, delete-orphan")
 
 class Place(Base):
     __tablename__ = "places"
-    id = Column(Integer, primary_key=True)
-    name = Column(String(255), nullable=False)
-    description = Column(Text, nullable=True)
-    address = Column(String(255), nullable=True)
-    latitude = Column(Float, nullable=True)
-    longitude = Column(Float, nullable=True)
-    category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(256), index=True, nullable=False)
+    category: Mapped[str] = mapped_column(String(64), index=True, nullable=False)  # cafe, museum, hospital, etc
+    address: Mapped[str] = mapped_column(String(256), nullable=True)
+    phone: Mapped[str] = mapped_column(String(64), nullable=True)
+    url: Mapped[str] = mapped_column(String(256), nullable=True)
+    city_id: Mapped[int] = mapped_column(ForeignKey("cities.id"), nullable=False)
 
-    category = relationship("Category", back_populates="places")
-    favorites = relationship("Favorite", back_populates="place", cascade="all, delete-orphan")
+    city: Mapped[City] = relationship(back_populates="places")
 
+engine = create_engine(DATABASE_URL, echo=False, future=True)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
-class Favorite(Base):
-    __tablename__ = "favorites"
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    place_id = Column(Integer, ForeignKey("places.id"), nullable=False)
-    added_at = Column(DateTime, default=datetime.datetime.utcnow)
-
-    user = relationship("User", back_populates="favorites")
-    place = relationship("Place", back_populates="favorites")
-
-
-def ensure_telegram_column():
-    """
-    Если таблица users существует, но в ней нет столбца telegram_id,
-    добавляем его (как nullable). Создаём индекс (если возможно).
-    """
-    try:
-        inspector = inspect(engine)
-        tables = inspector.get_table_names()
-        if "users" in tables:
-            cols = [c["name"] for c in inspector.get_columns("users")]
-            if "telegram_id" not in cols:
-                logger.info("Добавляем колонку 'telegram_id' в таблицу users...")
-                with engine.begin() as conn:
-                    # добавляем колонку как BIGINT (telegram id может быть большим)
-                    conn.execute(text("ALTER TABLE users ADD COLUMN telegram_id BIGINT"))
-                    # создаём индекс для ускорения поиска (IF NOT EXISTS поддерживается в PG)
-                    try:
-                        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_telegram_id ON users (telegram_id)"))
-                    except Exception as e:
-                        # для SQLite или старых версий PG может не сработать — просто логируем
-                        logger.warning("Не получилось создать индекс ix_users_telegram_id: %s", e)
-                logger.info("Колонка 'telegram_id' добавлена.")
-    except Exception as e:
-        logger.exception("Ошибка при попытке проверить/создать колонку telegram_id: %s", e)
-        # не прерываем инициализацию — дальше create_all() уже выполнен или будет обработан
-
-
-def init_db() -> None:
-    """
-    Создаёт отсутствующие таблицы и гарантирует, что колонка telegram_id существует.
-    """
-    logger.info("Creating DB tables (if not exists)...")
-    Base.metadata.create_all(bind=engine)
-    # если таблицы уже были — create_all ничего не изменит; поэтому явно проверим колонку
-    ensure_telegram_column()
-
-@contextmanager
-def get_session():
-    """
-    Контекстный менеджер для сессий SQLAlchemy.
-    Использование:
-        with get_session() as s:
-            s.add(...)
-    """
-    session = SessionLocal()
-    try:
-        yield session
+def init_db(seed: bool = True) -> None:
+    """Создаёт таблицы. При seed=True добавляет тестовые данные, если их нет."""
+    Base.metadata.create_all(engine)
+    if not seed:
+        return
+    with SessionLocal() as session:
+        # Если данных нет — добавим примеры
+        existing = session.scalar(select(func.count(Place.id)))
+        if existing and existing > 0:
+            return
+        city = City(name="Алматы")
+        session.add(city)
+        session.flush()
+        places = [
+            Place(name="Кафе Central", category="cafe", address="Абая 10", phone="+7 700 000 00 01", url="", city_id=city.id),
+            Place(name="Музей Истории", category="museum", address="Достык 5", phone="+7 700 000 00 02", url="", city_id=city.id),
+            Place(name="Поликлиника №1", category="hospital", address="Сатпаева 12", phone="+7 700 000 00 03", url="", city_id=city.id),
+        ]
+        session.add_all(places)
         session.commit()
-    except Exception as e:
-        logger.exception("Database session error: %s", e)
-        session.rollback()
-        raise
-    finally:
-        session.close()
+        logger.info("База инициализирована примерными данными.")
+
+def search_places(session: Session, query: str, limit: int = 5) -> list[Place]:
+    q = select(Place).where(Place.name.ilike(f"%{query}%")).limit(limit)
+    return list(session.scalars(q))
+
+def search_by_category(session: Session, category: str, limit: int = 10) -> list[Place]:
+    q = select(Place).where(Place.category.ilike(f"%{category}%")).limit(limit)
+    return list(session.scalars(q))

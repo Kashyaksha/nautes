@@ -1,4 +1,7 @@
-pytelegrambotapi>=4.0.0
-python-dotenv
-SQLAlchemy>=1.4
-psycopg2-binary
+pytelegrambotapi>=4.24.0
+python-dotenv>=1.0.1
+SQLAlchemy>=2.0.32
+psycopg2-binary>=2.9.9
+pydantic>=2.8.2
+fuzzywuzzy>=0.18.0
+python-levenshtein>=0.25.1

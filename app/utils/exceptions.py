@@ -1,5 +1,5 @@
 class AppError(Exception):
-    """Базовое приложение исключение"""
+    """Базовое исключение приложения"""
     pass
 
 class ConfigError(AppError):
